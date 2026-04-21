@@ -215,10 +215,10 @@ docker images | grep go-api
 ### 3.3 Test Locally Before Pushing
 
 ```bash
-# Port-forward DB from minikube so the container can reach it
-kubectl port-forward svc/db-service 5432:5432 &
+# Port-forward DB from minikube — bind to all interfaces so Docker can reach it
+kubectl port-forward --address 0.0.0.0 svc/db-service 5432:5432 &
 
-# Get the host IP (docker container uses this to reach the host network)
+# Get the host IP
 HOST_IP=$(hostname -I | awk '{print $1}')
 
 # Run container with environment variables
@@ -231,9 +231,9 @@ docker run --rm -d -p 8081:8080 \
   <DOCKER_USERNAME>/go-api:latest
 
 # Test endpoints
-curl -w "\n" http://localhost:8081/livez
-curl -w "\n" http://localhost:8081/readyz
-curl -w "\n" http://localhost:8081/
+curl http://localhost:8081/livez
+curl http://localhost:8081/readyz
+curl http://localhost:8081/
 
 # Stop the container
 docker stop $(docker ps -q --filter ancestor=<DOCKER_USERNAME>/go-api:latest)

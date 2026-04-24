@@ -89,11 +89,17 @@ hurl --version
 
 ## Phase 1 – Environment Setup (15–20 min)
 
-### 1.1 Fork & Clone Template Repo
+### 1.1 Fork Template Repo
+
+1. Open [https://github.com/pradist/deployment](https://github.com/pradist/deployment)
+2. Click **Fork** (top-right) → **Create fork**
+3. Clone your own fork:
 
 ```bash
-# Fork this repo on GitHub, then clone it
-git clone https://github.com/pradist/deployment.git
+# Set your GitHub username (use this for all subsequent commands)
+export GITHUB_USERNAME=<your-github-username>
+
+git clone https://github.com/${GITHUB_USERNAME}/deployment.git
 cd deployment
 ```
 
@@ -118,6 +124,10 @@ kubectl get nodes
 
 ```bash
 minikube addons enable dashboard
+
+# Wait until the Dashboard Pod is ready before port-forwarding
+kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=kubernetes-dashboard -n kubernetes-dashboard --timeout=40s
+
 kubectl port-forward -n kubernetes-dashboard service/kubernetes-dashboard 8080:80
 # Click Web Preview → Preview on Port 8080
 ```
@@ -198,6 +208,9 @@ Open `api/main.go` and review:
 ### 3.2 Build Docker Image
 
 ```bash
+# Set your Docker Hub username (use this for all subsequent commands)
+export DOCKER_USERNAME=<your-dockerhub-username>
+
 cd api
 
 # Download dependencies (generates go.sum)
@@ -206,7 +219,7 @@ go mod tidy
 cd ..
 
 # Build the image (multi-stage)
-docker build -t <DOCKER_USERNAME>/go-api:latest ./api
+docker build -t ${DOCKER_USERNAME}/go-api:latest ./api
 
 # Check image size (should be very small due to scratch base)
 docker images | grep go-api
@@ -215,10 +228,10 @@ docker images | grep go-api
 ### 3.3 Test Locally Before Pushing
 
 ```bash
-# Port-forward DB from minikube so the container can reach it
-kubectl port-forward svc/db-service 5432:5432 &
+# Port-forward DB from minikube — bind to all interfaces so Docker can reach it
+kubectl port-forward --address 0.0.0.0 svc/db-service 5432:5432 &
 
-# Get the host IP (docker container uses this to reach the host network)
+# Get the host IP
 HOST_IP=$(hostname -I | awk '{print $1}')
 
 # Run container with environment variables
@@ -228,39 +241,42 @@ docker run --rm -d -p 8081:8080 \
   -e DB_USER=postgres \
   -e DB_PASSWORD=postgres \
   -e DB_NAME=appdb \
-  <DOCKER_USERNAME>/go-api:latest
+  ${DOCKER_USERNAME}/go-api:latest
 
 # Test endpoints
-curl -w "\n" http://localhost:8081/livez
-curl -w "\n" http://localhost:8081/readyz
-curl -w "\n" http://localhost:8081/
-
-# Stop the container
-docker stop $(docker ps -q --filter ancestor=<DOCKER_USERNAME>/go-api:latest)
+curl http://localhost:8081/livez
+curl http://localhost:8081/readyz
+curl http://localhost:8081/
+curl http://localhost:8081/items
 ```
 
-### 3.4 Push Image to Docker Hub
+### 3.4 Stop the container
+
+```bash
+docker stop $(docker ps -q --filter ancestor=${DOCKER_USERNAME}/go-api:latest)
+```
+
+### 3.5 Push Image to Docker Hub
 
 ```bash
 docker login
-docker push <DOCKER_USERNAME>/go-api:latest
+docker push ${DOCKER_USERNAME}/go-api:latest
 ```
 
-### 3.5 Update Image Name in k8s/api-deployment.yaml
+### 3.6 Update Image Name in k8s/api-deployment.yaml
 
 ```bash
-# Replace DOCKER_USERNAME with your actual username
-sed -i "s/DOCKER_USERNAME/<YOUR_DOCKERHUB_USERNAME>/g" k8s/api-deployment.yaml
+sed -i "s/DOCKER_USERNAME/${DOCKER_USERNAME}/g" k8s/api-deployment.yaml
 ```
 
-### 3.6 Deploy Go API
+### 3.7 Deploy Go API
 
 ```bash
 kubectl apply -f k8s/api-deployment.yaml
 kubectl get pods -w   # Wait until status is Running
 ```
 
-### 3.7 Test the API via Minikube
+### 3.8 Test the API via Minikube
 
 ```bash
 NODE_IP=$(minikube ip)
@@ -275,12 +291,24 @@ curl http://${NODE_IP}:30080/readyz
 
 ### 4.1 Configure GitHub Secrets
 
-Go to your GitHub repo → **Settings → Secrets and variables → Actions** → New repository secret
+> **Must do this before running the pipeline** — without these secrets, the Docker login step will fail.
+
+**Step 1 – Create a Docker Hub Access Token:**
+
+1. Go to [https://hub.docker.com/settings/security](https://hub.docker.com/settings/security)
+2. Click **New Access Token** → give it a name (e.g. `github-actions`) → **Generate**
+3. Copy the token (it will only be shown once)
+
+**Step 2 – Add secrets to your GitHub repo:**
+
+1. Go to your forked repo on GitHub
+2. Click **Settings** → **Secrets and variables** → **Actions**
+3. Click **New repository secret** and add both:
 
 | Secret Name | Value |
 | ----------- | ----- |
 | `DOCKER_USERNAME` | Your Docker Hub username |
-| `DOCKER_TOKEN` | Docker Hub Access Token ([create one here](https://hub.docker.com/settings/security)) |
+| `DOCKER_TOKEN` | The access token you just created |
 
 ### 4.2 Install Self-hosted Runner on Cloud Shell
 
@@ -293,14 +321,36 @@ curl -o actions-runner-linux-x64-2.316.1.tar.gz -L \
   https://github.com/actions/runner/releases/download/v2.316.1/actions-runner-linux-x64-2.316.1.tar.gz
 tar xzf ./actions-runner-linux-x64-2.316.1.tar.gz
 
-# Configure with the token from GitHub
-./config.sh --url https://github.com/<YOUR_USERNAME>/deployment --token <TOKEN>
+# Get the registration token from GitHub:
+# → Go to your repo → Settings → Actions → Runners → New self-hosted runner
+# → Select Linux / x64 → Copy the token shown on that page (valid for 1 hour)
+./config.sh --url https://github.com/${GITHUB_USERNAME}/deployment --token <TOKEN>
 
 # Start runner in the background using tmux
 tmux new -s runner
 ./run.sh
 # Press Ctrl+B then D to detach
 ```
+
+> **Note:** Cloud Shell has only **5GB** of home disk. If the pipeline fails with `ENOSPC: no space left on device`, run this to free up space before retrying:
+>
+> ```bash
+> # Check disk usage
+> df -h ~
+> du -sh ~/* 2>/dev/null | sort -rh | head -10
+>
+> # Clear runner tool cache and build artifacts
+> rm -rf ~/actions-runner/_work
+>
+> # Clear Docker cache
+> docker system prune -af --volumes
+>
+> # Clear Go module/build cache
+> go clean -cache -modcache
+>
+> # Remove leftover .deb files
+> rm -f ~/*.deb
+> ```
 
 ### 4.3 The Magic Moment – Test CI/CD
 
@@ -349,8 +399,8 @@ kubectl port-forward svc/grafana-service 3000:3000 &
 1. **Connections → Data Sources** → Verify Prometheus URL = `http://prometheus-service:9090`
 2. **Dashboards → New → Import** → Enter ID `12708` (Go Metrics Dashboard) or `1860` (Node Exporter)
 3. Add custom panels:
-   - Query: `rate(http_requests_total[1m])` → Requests per second
-   - Query: `histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[1m]))` → P95 latency
+   * Query: `rate(http_requests_total[1m])` → Requests per second
+   * Query: `histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[1m]))` → P95 latency
 
 ### 5.3 Run k6 Load Test
 
@@ -363,9 +413,9 @@ k6 run -e BASE_URL=http://$(minikube ip):30080 tests/k6/script.js
 
 Watch the graphs in Grafana while k6 is running:
 
-- **Request rate** will spike
-- **CPU usage** of Pods will increase
-- **P95 latency** will change with load
+* **Request rate** will spike
+* **CPU usage** of Pods will increase
+* **P95 latency** will change with load
 
 ### 5.5 Functional Test with Hurl
 

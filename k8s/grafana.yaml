@@ -86,6 +86,7 @@ data:
     datasources:
       - name: Prometheus
         type: prometheus
+        uid: prometheus
         url: http://prometheus-service:9090
         access: proxy
         isDefault: true
@@ -134,7 +135,7 @@ data:
             "legendFormat": "{{method}} {{path}} {{status}}",
             "refId": "A"
           }],
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
         },
         {
@@ -146,18 +147,10 @@ data:
             "legendFormat": "{{method}} {{path}}",
             "refId": "A"
           }],
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
         }
-      ],
-      "templating": {
-        "list": [{
-          "name": "DS_PROMETHEUS",
-          "type": "datasource",
-          "query": "prometheus",
-          "current": { "text": "Prometheus", "value": "Prometheus" }
-        }]
-      }
+      ]
     }
 
 ---

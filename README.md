@@ -6,9 +6,7 @@
 
 ```text
 deployment/
-├── .github/
-│   └── workflows/
-│       └── ci-cd.yml           # GitHub Actions CI/CD pipeline
+├── .github/                    # (no committed workflow — CI runs on a manual self-hosted runner)
 ├── api/
 │   ├── main.go                 # Go (Gin) API with health probes + metrics
 │   ├── go.mod
@@ -206,7 +204,7 @@ kubectl exec -it deploy/postgres -- psql -U postgres -d appdb -c "\dt"
 | Port | `5432` |
 | Database | `appdb` |
 | Username | `postgres` |
-| Password | `postgres` |
+| Password | `password` |
 
 * Click **Test Connection** → **Save Connection** → run queries directly from the editor
 
@@ -234,6 +232,8 @@ cd api
 
 # Download dependencies (generates go.sum)
 go mod tidy
+# Keep the committed vendor/ in sync with go.mod (build uses -mod=vendor)
+go mod vendor
 
 cd ..
 
@@ -258,7 +258,7 @@ docker run --rm -d -p 8081:8080 \
   -e DB_HOST=${HOST_IP} \
   -e DB_PORT=5432 \
   -e DB_USER=postgres \
-  -e DB_PASSWORD=postgres \
+  -e DB_PASSWORD=password \
   -e DB_NAME=appdb \
   ${DOCKER_USERNAME}/go-api:latest
 
@@ -284,8 +284,11 @@ docker push ${DOCKER_USERNAME}/go-api:latest
 
 ### 3.6 Update Image Name in k8s/api-deployment.yaml
 
+The file ships with `image: pradiske/go-api:latest` and a `TODO` comment. Replace the
+placeholder repo with your own Docker Hub repo before applying:
+
 ```bash
-sed -i "s/DOCKER_USERNAME/${DOCKER_USERNAME}/g" k8s/api-deployment.yaml
+sed -i "s|pradiske/go-api|${DOCKER_USERNAME}/go-api|" k8s/api-deployment.yaml
 ```
 
 ### 3.7 Deploy Go API
